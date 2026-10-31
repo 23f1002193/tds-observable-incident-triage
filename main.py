@@ -1,5 +1,4 @@
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 
 from database import (
     DatabaseConflict,
@@ -8,6 +7,7 @@ from database import (
 )
 from incident_engine import start_incident, process_receipt
 from models import IncidentRequest, ReceiptRequest
+
 
 app = FastAPI(title="Observable Incident Triage")
 
@@ -18,20 +18,31 @@ def startup():
 
 
 @app.post("/v2/incidents")
-def create_incident(request: IncidentRequest):
+def create_incident(
+    request: IncidentRequest,
+    traceparent: str | None = Header(default=None),
+    tracestate: str | None = Header(default=None),
+):
     try:
-        return start_incident(request)
+        return start_incident(
+            request,
+            traceparent=traceparent,
+            tracestate=tracestate,
+        )
+
     except DatabaseConflict:
         raise HTTPException(
             status_code=409,
-            detail="runId content conflict"
+            detail="Run ID already exists with different content.",
         )
+
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error))
+
     except Exception:
         raise HTTPException(
             status_code=500,
-            detail="Incident processing failed"
+            detail="Incident processing failed.",
         )
 
 
@@ -42,7 +53,7 @@ def read_incident(runId: str):
     if not incident:
         raise HTTPException(
             status_code=404,
-            detail="Incident not found"
+            detail="Incident not found.",
         )
 
     return incident["response"]
@@ -52,20 +63,25 @@ def read_incident(runId: str):
 def submit_receipt(runId: str, receipt: ReceiptRequest):
     try:
         return process_receipt(runId, receipt)
+
     except DatabaseConflict:
         raise HTTPException(
             status_code=409,
-            detail="Receipt ID content conflict"
+            detail="Receipt ID already exists with different content.",
         )
+
     except KeyError:
         raise HTTPException(
             status_code=404,
-            detail="Incident not found"
+            detail="Incident not found.",
         )
+
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error))
+
     except Exception:
         raise HTTPException(
             status_code=500,
-            detail="Receipt processing failed"
+            detail="Receipt processing failed.",
         )
+
