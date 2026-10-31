@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class IncidentDetails(BaseModel):
@@ -51,5 +51,6 @@ class ReceiptRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     receiptId: str
-    outcomes: List[ToolOutcome] = []
-    approvals: List[ApprovalOutcome] = []
+    outcomes: List[ToolOutcome] = Field(default_factory=list)
+    approvals: List[ApprovalOutcome] = Field(default_factory=list)
+
