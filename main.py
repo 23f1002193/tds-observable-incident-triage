@@ -1,8 +1,12 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 
-from database import DatabaseConflict, get_incident, initialize_database
-from incident_engine import start_incident
+from fastapi import FastAPI, HTTPException
+
+from database import (
+    DatabaseConflict,
+    get_incident,
+    initialize_database,
+)
+from incident_engine import start_incident, process_receipt
 from models import IncidentRequest, ReceiptRequest
 
 app = FastAPI(title="Observable Incident Triage")
@@ -20,8 +24,10 @@ def create_incident(request: IncidentRequest):
     except DatabaseConflict:
         raise HTTPException(
             status_code=409,
-            detail="runId already exists with different request content"
+            detail="runId content conflict"
         )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
     except Exception:
         raise HTTPException(
             status_code=500,
@@ -44,8 +50,22 @@ def read_incident(runId: str):
 
 @app.post("/v2/incidents/{runId}/receipts")
 def submit_receipt(runId: str, receipt: ReceiptRequest):
-    # Receipt processing will be implemented next.
-    raise HTTPException(
-        status_code=501,
-        detail="Receipt processing is not implemented yet"
-    )
+    try:
+        return process_receipt(runId, receipt)
+    except DatabaseConflict:
+        raise HTTPException(
+            status_code=409,
+            detail="Receipt ID content conflict"
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found"
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Receipt processing failed"
+        )
