@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 
 class PlanningError(Exception):
