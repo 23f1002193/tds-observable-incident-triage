@@ -1,17 +1,23 @@
+
 import json
 import os
 import sqlite3
 from pathlib import Path
 
+
 DB_PATH = os.getenv("DATABASE_PATH", "/var/data/incidents.db")
 
-# Create the database directory if it does not exist.
-Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
+class DatabaseConflict(Exception):
+    """Raised when an existing ID is reused with different content."""
 
 
 def get_connection():
+    Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+
     connection = sqlite3.connect(DB_PATH, timeout=30)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     return connection
 
 
@@ -56,19 +62,38 @@ def get_incident(run_id):
 
 
 def save_incident(run_id, request_hash, state, response):
-    response_json = json.dumps(response, sort_keys=True)
+    response_json = json.dumps(
+        response, sort_keys=True, separators=(",", ":")
+    )
 
     with get_connection() as connection:
-        connection.execute("""
-            INSERT INTO incidents (
-                run_id, request_hash, state, response_json
+        connection.execute("BEGIN IMMEDIATE")
+
+        existing = connection.execute(
+            "SELECT request_hash FROM incidents WHERE run_id = ?",
+            (run_id,)
+        ).fetchone()
+
+        if existing and existing["request_hash"] != request_hash:
+            raise DatabaseConflict(
+                "This runId already exists with different request content."
             )
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(run_id) DO UPDATE SET
-                state = excluded.state,
-                response_json = excluded.response_json,
-                updated_at = CURRENT_TIMESTAMP
-        """, (run_id, request_hash, state, response_json))
+
+        if existing:
+            connection.execute("""
+                UPDATE incidents
+                SET state = ?,
+                    response_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE run_id = ?
+            """, (state, response_json, run_id))
+        else:
+            connection.execute("""
+                INSERT INTO incidents (
+                    run_id, request_hash, state, response_json
+                )
+                VALUES (?, ?, ?, ?)
+            """, (run_id, request_hash, state, response_json))
 
 
 def get_receipt(receipt_id):
@@ -87,15 +112,30 @@ def get_receipt(receipt_id):
 
 
 def save_receipt(receipt_id, run_id, receipt_hash, receipt):
+    receipt_json = json.dumps(
+        receipt, sort_keys=True, separators=(",", ":")
+    )
+
     with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+
+        existing = connection.execute(
+            "SELECT receipt_hash FROM receipts WHERE receipt_id = ?",
+            (receipt_id,)
+        ).fetchone()
+
+        if existing:
+            if existing["receipt_hash"] != receipt_hash:
+                raise DatabaseConflict(
+                    "This receiptId already exists with different content."
+                )
+            return False
+
         connection.execute("""
             INSERT INTO receipts (
                 receipt_id, run_id, receipt_hash, receipt_json
             )
             VALUES (?, ?, ?, ?)
-        """, (
-            receipt_id,
-            run_id,
-            receipt_hash,
-            json.dumps(receipt, sort_keys=True)
-        ))
+        """, (receipt_id, run_id, receipt_hash, receipt_json))
+
+        return True
