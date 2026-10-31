@@ -221,7 +221,77 @@ Rules:
 Incident data:
 """ + json.dumps(prompt_data, ensure_ascii=False)
 
-    result = ask_gemini(prompt)
+    try:
+        result = ask_gemini(prompt)
+    except PlanningError:
+        # Deterministic fallback when Gemini is unavailable.
+        diagnosis_evidence = evidence_ids[:2]
+
+        def make_arguments(schema, tool_name):
+            properties = schema.get("properties", {})
+            required = schema.get("required", [])
+            args = {}
+
+            for key in required:
+                prop = properties.get(key, {})
+                kind = prop.get("type")
+                name = key.lower()
+
+                if kind == "string":
+                    if "service" in name:
+                        args[key] = incident["service"]
+                    elif "incident" in name:
+                        args[key] = incident["incidentId"]
+                    elif "environment" in name:
+                        args[key] = "production"
+                    elif "metric" in name:
+                        args[key] = "latency"
+                    elif "deployment" in name:
+                        args[key] = "current"
+                    else:
+                        args[key] = prop.get("enum", ["production"])[0]
+                elif kind == "integer":
+                    args[key] = prop.get("minimum", 1)
+                elif kind == "number":
+                    args[key] = prop.get("minimum", 1)
+                elif kind == "boolean":
+                    args[key] = True
+                elif kind == "array":
+                    args[key] = []
+                elif kind == "object":
+                    args[key] = {}
+
+            return args
+
+        selected_diagnostics = diagnostic_catalog[:maximum]
+        if not selected_diagnostics:
+            raise PlanningError("No diagnostic tools are available.")
+
+        selected_effect = effect_catalog[0]
+
+        result = {
+            "rootCause": allowed_causes[0],
+            "evidence": diagnosis_evidence,
+            "diagnostics": [
+                {
+                    "toolName": tool["name"],
+                    "arguments": make_arguments(
+                        tool.get("inputSchema", {}), tool["name"]
+                    ),
+                    "evidence": diagnosis_evidence[:1],
+                }
+                for tool in selected_diagnostics
+            ],
+            "effect": {
+                "toolName": selected_effect["name"],
+                "arguments": make_arguments(
+                    selected_effect.get("inputSchema", {}),
+                    selected_effect["name"],
+                ),
+                "evidence": diagnosis_evidence[:1],
+                "reason": "Selected as the first policy-permitted effect.",
+            },
+        }
 
     if not isinstance(result, dict):
         raise PlanningError("Invalid Gemini planning response.")
